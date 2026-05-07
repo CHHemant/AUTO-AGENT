@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 
 from config import OUTPUT_DIR
-from models import CoverLetter, InternshipOpportunity, ResumeData, TailoredResume
+from models import CoverLetter, InternshipOpportunity, ResumeData, TailoredResume, UserProfile
 from utils.file_handler import FileHandler
 from utils.llm_client import LLMClient
 from utils.logger import get_logger
@@ -71,6 +71,7 @@ class CoverLetterAgent:
         resume: ResumeData,
         opportunity: InternshipOpportunity,
         tailored_resume: TailoredResume,
+        profile: UserProfile | None = None,
     ) -> CoverLetter:
         """
         Generate a cover letter for *opportunity*.
@@ -80,6 +81,8 @@ class CoverLetterAgent:
         resume          : Parsed applicant profile.
         opportunity     : Target internship.
         tailored_resume : ATS-tailored resume content for this opportunity.
+        profile         : Optional applicant profile with LinkedIn URL and
+                          other application details to include in the letter.
         """
         log.info(
             "[bold]CoverLetterAgent[/] – writing letter for [cyan]%s[/] @ %s",
@@ -97,7 +100,7 @@ class CoverLetterAgent:
             max_words=max_words,
         )
 
-        user_prompt = self._build_prompt(resume, opportunity, tailored_resume)
+        user_prompt = self._build_prompt(resume, opportunity, tailored_resume, profile)
         content = self._llm.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -123,12 +126,31 @@ class CoverLetterAgent:
         resume: ResumeData,
         opportunity: InternshipOpportunity,
         tailored_resume: TailoredResume,
+        profile: UserProfile | None = None,
     ) -> str:
-        return (
-            f"## Applicant\nName: {resume.full_name}\nEmail: {resume.email}\n\n"
-            f"## Target Role\n{opportunity.title} at {opportunity.organization}, "
+        parts = [
+            f"## Applicant\nName: {resume.full_name}\nEmail: {resume.email}\n",
+        ]
+        if profile:
+            if profile.linkedin_url:
+                parts.append(f"LinkedIn: {profile.linkedin_url}\n")
+            if profile.github_url:
+                parts.append(f"GitHub: {profile.github_url}\n")
+            if profile.portfolio_url:
+                parts.append(f"Portfolio: {profile.portfolio_url}\n")
+            if profile.work_authorization:
+                parts.append(f"Work Authorisation: {profile.work_authorization}\n")
+            if profile.location_preference:
+                parts.append(f"Location Preference: {profile.location_preference}\n")
+            if profile.notice_period:
+                parts.append(f"Notice Period: {profile.notice_period}\n")
+            if profile.additional_notes:
+                parts.append(f"Additional Notes: {profile.additional_notes}\n")
+        parts += [
+            f"\n## Target Role\n{opportunity.title} at {opportunity.organization}, "
             f"{opportunity.city}, {opportunity.country}\n"
             f"Research area: {opportunity.research_area}\n\n"
             f"## Job Description\n{opportunity.description}\n\n"
-            f"## Tailored Resume Highlights\n{tailored_resume.content[:3000]}\n"
-        )
+            f"## Tailored Resume Highlights\n{tailored_resume.content[:3000]}\n",
+        ]
+        return "".join(parts)

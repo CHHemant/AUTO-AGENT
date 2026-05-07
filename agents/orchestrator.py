@@ -34,7 +34,7 @@ from agents.feedback_loop import FeedbackDecision, FeedbackLoopAgent
 from agents.internship_search import InternshipSearchAgent
 from agents.resume_parser import ResumeParserAgent
 from agents.resume_tailor import ResumeTailoringAgent
-from models import ApplicationRecord, ApplicationStatus
+from models import ApplicationRecord, ApplicationStatus, UserProfile
 from utils.file_handler import FileHandler
 from utils.llm_client import LLMClient
 from utils.logger import get_logger
@@ -55,6 +55,7 @@ class OrchestratorAgent:
         llm: LLMClient | None = None,
         use_sample_data: bool = True,
         dry_run: bool = True,
+        profile: UserProfile | None = None,
     ) -> None:
         _llm = llm or LLMClient()
         self._parser     = ResumeParserAgent(llm=_llm)
@@ -66,6 +67,7 @@ class OrchestratorAgent:
         self._feedback   = FeedbackLoopAgent()
         self._fh         = FileHandler()
         self._dry_run    = dry_run
+        self._profile    = profile
 
     # ------------------------------------------------------------------
     def run(
@@ -156,7 +158,8 @@ class OrchestratorAgent:
 
             # ── 3d: Cover letter ────────────────────────────────────────────
             try:
-                cover = self._cover.generate(resume, opp, record.tailored_resume)
+                cover = self._cover.generate(resume, opp, record.tailored_resume,
+                                              profile=self._profile)
                 record.cover_letter = cover
                 record.status = ApplicationStatus.COVER_LETTER_DONE
             except Exception as exc:  # noqa: BLE001
