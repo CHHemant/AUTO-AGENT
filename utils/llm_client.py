@@ -1,23 +1,22 @@
 """
-Thin wrapper around the OpenAI chat completion API with retry logic.
+Provider-agnostic LLM wrapper with retry logic.
 
-When OPENAI_API_KEY is not set the client operates in *mock* mode and returns
-canned responses so the rest of the system can be exercised without a live key.
+Supported providers (set via ``LLM_PROVIDER`` env var):
+  • openai    – OpenAI ChatCompletion  (requires ``OPENAI_API_KEY``)
+  • anthropic – Anthropic Messages API (requires ``ANTHROPIC_API_KEY``)
+  • google    – Google Gemini API      (requires ``GOOGLE_API_KEY``)
+
+When the active provider's API key is absent the client operates in *mock*
+mode, returning canned responses so the full pipeline can be exercised without
+any live credentials.
 """
 
 from __future__ import annotations
 
 import json
+import config as _cfg
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from config import (
-    OPENAI_API_KEY,
-    LLM_MODEL,
-    LLM_TEMPERATURE,
-    LLM_MAX_TOKENS,
-    MAX_RETRIES,
-    RETRY_WAIT_SECONDS,
-)
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -64,35 +63,92 @@ _MOCK_RESPONSES: dict[str, str] = {
     "default": "Mock LLM response.",
 }
 
+_VALID_PROVIDERS = ("openai", "anthropic", "google")
+
 
 class LLMClient:
     """
-    Wrapper around OpenAI ChatCompletion.
+    Provider-agnostic wrapper around LLM chat completion APIs.
 
-    Falls back to deterministic mock responses when OPENAI_API_KEY is absent.
+    Falls back to deterministic mock responses when the active provider's
+    API key is absent.
     """
 
     def __init__(self) -> None:
-        self._mock = not bool(OPENAI_API_KEY)
+        # Read config at construction time so test fixtures can patch _cfg
+        self._provider = _cfg.LLM_PROVIDER.lower()
+        if self._provider not in _VALID_PROVIDERS:
+            raise ValueError(
+                f"Unknown LLM_PROVIDER '{self._provider}'. "
+                f"Valid choices: {', '.join(_VALID_PROVIDERS)}"
+            )
+
+        api_key = self._active_key()
+        self._mock = not bool(api_key)
+
         if self._mock:
-            log.warning("OPENAI_API_KEY not set – running in [bold yellow]mock mode[/].")
+            log.warning(
+                "No API key found for provider [bold yellow]%s[/] – "
+                "running in [bold yellow]mock mode[/].",
+                self._provider,
+            )
         else:
+            self._init_client(api_key)
+
+    # ------------------------------------------------------------------
+    def _active_key(self) -> str:
+        """Return the API key for the currently configured provider."""
+        if self._provider == "openai":
+            return _cfg.OPENAI_API_KEY
+        if self._provider == "anthropic":
+            return _cfg.ANTHROPIC_API_KEY
+        if self._provider == "google":
+            return _cfg.GOOGLE_API_KEY
+        return ""  # unreachable after provider validation
+
+    def _init_client(self, api_key: str) -> None:
+        """Initialise the provider-specific SDK client."""
+        if self._provider == "openai":
             try:
-                import openai
-                self._client = openai.OpenAI(api_key=OPENAI_API_KEY)
+                import openai  # noqa: PLC0415
+                self._client = openai.OpenAI(api_key=api_key)
             except ImportError as exc:
-                raise ImportError("openai package is required. Run: pip install openai") from exc
+                raise ImportError(
+                    "openai package is required for the OpenAI provider. "
+                    "Run: pip install openai"
+                ) from exc
+
+        elif self._provider == "anthropic":
+            try:
+                import anthropic  # noqa: PLC0415
+                self._client = anthropic.Anthropic(api_key=api_key)
+            except ImportError as exc:
+                raise ImportError(
+                    "anthropic package is required for the Anthropic provider. "
+                    "Run: pip install anthropic"
+                ) from exc
+
+        elif self._provider == "google":
+            try:
+                import google.generativeai as genai  # noqa: PLC0415
+                genai.configure(api_key=api_key)
+                self._client = genai
+            except ImportError as exc:
+                raise ImportError(
+                    "google-generativeai package is required for the Google provider. "
+                    "Run: pip install google-generativeai"
+                ) from exc
 
     # ------------------------------------------------------------------
     def complete(self, system_prompt: str, user_prompt: str, task_key: str = "default") -> str:
         """
-        Send a chat completion request and return the assistant's reply as a string.
+        Send a chat completion request and return the assistant's reply.
 
         Parameters
         ----------
         system_prompt : str  Role/instruction context for the model.
         user_prompt   : str  The actual request.
-        task_key      : str  Key used to look up mock responses when in mock mode.
+        task_key      : str  Key used to look up mock responses in mock mode.
         """
         if self._mock:
             response = _MOCK_RESPONSES.get(task_key, _MOCK_RESPONSES["default"])
@@ -103,21 +159,47 @@ class LLMClient:
 
     @retry(
         retry=retry_if_exception_type(Exception),
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=RETRY_WAIT_SECONDS, min=1, max=30),
+        stop=stop_after_attempt(_cfg.MAX_RETRIES),
+        wait=wait_exponential(multiplier=_cfg.RETRY_WAIT_SECONDS, min=1, max=30),
         reraise=True,
     )
     def _call_api(self, system_prompt: str, user_prompt: str) -> str:
-        """Call the OpenAI API with exponential back-off retry."""
-        import openai  # noqa: PLC0415
+        """Route to the appropriate provider backend with exponential back-off retry."""
+        if self._provider == "openai":
+            return self._call_openai(system_prompt, user_prompt)
+        if self._provider == "anthropic":
+            return self._call_anthropic(system_prompt, user_prompt)
+        if self._provider == "google":
+            return self._call_google(system_prompt, user_prompt)
+        raise RuntimeError(f"No backend for provider '{self._provider}'")  # pragma: no cover
 
+    # ------------------------------------------------------------------ backends
+    def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
         response = self._client.chat.completions.create(
-            model=LLM_MODEL,
-            temperature=LLM_TEMPERATURE,
-            max_tokens=LLM_MAX_TOKENS,
+            model=_cfg.LLM_MODEL,
+            temperature=_cfg.LLM_TEMPERATURE,
+            max_tokens=_cfg.LLM_MAX_TOKENS,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         )
         return response.choices[0].message.content or ""
+
+    def _call_anthropic(self, system_prompt: str, user_prompt: str) -> str:
+        response = self._client.messages.create(
+            model=_cfg.LLM_MODEL,
+            max_tokens=_cfg.LLM_MAX_TOKENS,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text if response.content else ""
+
+    def _call_google(self, system_prompt: str, user_prompt: str) -> str:
+        import google.generativeai as genai  # noqa: PLC0415
+        model = genai.GenerativeModel(
+            model_name=_cfg.LLM_MODEL,
+            system_instruction=system_prompt,
+        )
+        response = model.generate_content(user_prompt)
+        return response.text if response.text else ""

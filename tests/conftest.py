@@ -10,6 +10,7 @@ from models import (
     InternshipOpportunity,
     ResumeData,
     TailoredResume,
+    UserProfile,
 )
 from utils.llm_client import LLMClient
 
@@ -84,12 +85,41 @@ def sample_ats_result() -> ATSResult:
 
 
 @pytest.fixture()
+def sample_profile() -> UserProfile:
+    return UserProfile(
+        full_name="Alice Researcher",
+        email="alice@example.com",
+        phone="+1-555-0101",
+        linkedin_url="https://linkedin.com/in/aliceresearcher",
+        github_url="https://github.com/alice",
+        work_authorization="Requires visa sponsorship",
+        location_preference="Hybrid",
+        notice_period="Immediate",
+        willing_to_relocate=True,
+        target_roles=["Research Intern", "ML Engineer"],
+        preferred_countries=["USA", "Germany"],
+    )
+
+
+@pytest.fixture()
 def mock_llm() -> LLMClient:
     """Return an LLMClient that always uses mock responses."""
-    # Force mock mode by ensuring no API key is configured
     import config  # noqa: PLC0415
-    original = config.OPENAI_API_KEY
+
+    # Save all provider keys and clear them so LLMClient enters mock mode
+    saved = {
+        "OPENAI_API_KEY":    config.OPENAI_API_KEY,
+        "ANTHROPIC_API_KEY": config.ANTHROPIC_API_KEY,
+        "GOOGLE_API_KEY":    config.GOOGLE_API_KEY,
+    }
     config.OPENAI_API_KEY = ""
+    config.ANTHROPIC_API_KEY = ""
+    config.GOOGLE_API_KEY = ""
+
     client = LLMClient()
-    config.OPENAI_API_KEY = original
+
+    config.OPENAI_API_KEY    = saved["OPENAI_API_KEY"]
+    config.ANTHROPIC_API_KEY = saved["ANTHROPIC_API_KEY"]
+    config.GOOGLE_API_KEY    = saved["GOOGLE_API_KEY"]
+
     return client

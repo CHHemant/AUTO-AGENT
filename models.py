@@ -97,3 +97,25 @@ class ApplicationRecord:
     status: ApplicationStatus = ApplicationStatus.PENDING
     error_message: str = ""
     retry_count: int = 0
+
+
+@dataclass
+class UserProfile:
+    """
+    Applicant profile collected once and reused across all applications.
+
+    Persisted to disk so the user is not re-prompted on every run.
+    """
+    full_name: str = ""
+    email: str = ""
+    phone: str = ""
+    linkedin_url: str = ""
+    github_url: str = ""
+    portfolio_url: str = ""
+    work_authorization: str = ""   # e.g. "US Citizen", "Requires visa sponsorship"
+    location_preference: str = ""  # e.g. "Remote", "On-site", "Hybrid"
+    notice_period: str = ""        # e.g. "Immediate", "2 weeks", "1 month"
+    willing_to_relocate: bool = True
+    target_roles: list[str] = field(default_factory=list)
+    preferred_countries: list[str] = field(default_factory=list)
+    additional_notes: str = ""

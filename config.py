@@ -7,9 +7,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── LLM Settings ────────────────────────────────────────────────────────────
+# ─── LLM Provider ────────────────────────────────────────────────────────────
+# Set LLM_PROVIDER to one of: openai | anthropic | google
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai").lower()
+
+# ─── API Keys (only the key for your chosen provider is required) ─────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+
+# ─── LLM Settings ────────────────────────────────────────────────────────────
+# Default models per provider – overridable via LLM_MODEL env var.
+_DEFAULT_MODELS: dict[str, str] = {
+    "openai":    "gpt-4o",
+    "anthropic": "claude-opus-4-5",
+    "google":    "gemini-1.5-pro",
+}
+LLM_MODEL: str = os.getenv("LLM_MODEL", _DEFAULT_MODELS.get(LLM_PROVIDER, "gpt-4o"))
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
